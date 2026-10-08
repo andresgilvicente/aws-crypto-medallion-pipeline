@@ -12,9 +12,9 @@
 
 # AWS Crypto Medallion Pipeline
 
-> A cloud-native data platform that turns raw cryptocurrency market data into analytics-ready datasets, both **historically** and in **real time**.
+A cloud-native data platform that turns raw **cryptocurrency** market data into analytics-ready datasets, both **historically** and in **real time**.
 
-Market data is only useful once it is clean, consistent and enriched. This project automates that journey on AWS with two complementary layers:
+Market data is only useful once it is clean, consistent and enriched. This project automates that journey on **AWS** with two complementary layers:
 
 - **Batch layer** — ingests historical OHLCV prices from TradingView into an S3 data lake and refines them through a **Bronze → Silver → Gold** medallion architecture. The Gold layer adds technical indicators (SMA, EMA, RSI, MACD) and is queryable with SQL through Amazon Athena.
 - **Streaming layer** — streams live 1-minute candles from Binance through Kafka, computes a rolling 5-minute **VWAP** with Spark Structured Streaming, and stores the results in Amazon Timestream.
