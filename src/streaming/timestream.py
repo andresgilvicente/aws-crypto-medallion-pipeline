@@ -1,48 +1,40 @@
 #!/usr/bin/env python3
 """
-Consumidor Kafka -> Amazon Timestream.
+Kafka -> Amazon Timestream consumer.
 
-Escucha dos topics y escribe en dos tablas Timestream:
-- imat3a_SOL_BigDaddyks         -> sol_quotes_raw_bigdaddyks (medida: close)
-- imat3a_SOL_BigDaddyks_VWAP    -> sol_vwap_5m_bigdaddyks    (medida: vwap)
+Listens to two topics and writes to two Timestream tables:
+- imat3a_SOL_BigDaddyks         -> sol_quotes_raw_bigdaddyks (measure: close)
+- imat3a_SOL_BigDaddyks_VWAP    -> sol_vwap_5m_bigdaddyks    (measure: vwap)
 
-Este script se basa en los mensajes generados por:
-- kafka_simple_producer.py (close y volumen por vela 1m)
-- SparkStreamingApp.py (VWAP 5m)
+It consumes the messages produced by:
+- kafka_simple_producer.py (close and volume per 1m candle)
+- SparkStreamingApp.py (5m VWAP)
 
-Este script lo vamos a ejecutar en la instancia de la EC2
+Intended to run on an EC2 instance.
 """
 
-# Importamos las librerías necesarias
-import json                  # Para formatear la salida por pantalla de forma legible (pretty print)
-import time                  # Para generar un timestamp actual para la versión del registro
-from datetime import datetime, timezone # Para el manejo y conversión de fechas
+import json
+import time
+from datetime import datetime, timezone
 
-import boto3                 # El SDK de AWS para Python. Nos permite interactuar con los servicios de AWS (como Timestream)
+import boto3
 
 from kafka import KafkaConsumer
-from kafka.structs import TopicPartition
+
+from kafka_config import BOOTSTRAP_SERVERS, USERNAME, PASSWORD, GROUP_ID
 
 # ==========================================
-# PARÁMETROS DE CONFIGURACIÓN
+# CONFIGURATION
 # ==========================================
-# Aquí definimos las variables globales que le dicen al script dónde escribir y qué datos usar.
-REGION = "eu-west-1"          # Región de AWS
-DATABASE = "imat3a_crypto_rt" # Base de datos en Timestream
-QUOTES_TABLE = "sol_quotes_raw_bigdaddyks"  # Tabla para las cotizaciones en crudo
-VWAP_TABLE = "sol_vwap_5m_bigdaddyks"       # Tabla para el VWAP 5m
+REGION = "eu-west-1"                        # AWS region
+DATABASE = "imat3a_crypto_rt"               # Timestream database
+QUOTES_TABLE = "sol_quotes_raw_bigdaddyks"  # Raw quotes table
+VWAP_TABLE = "sol_vwap_5m_bigdaddyks"       # 5-minute VWAP table
 
-# ==========================================
-# Configuración - Parámetros consumer
-# =========================================
-BOOTSTRAP_SERVERS = "51.49.235.244:9092"
-USERNAME = "kafka_client"
-PASSWORD = "88b8a35dca1a04da57dc5f3e"
-TOPIC_S5_1 = "imat3a_SOL_BigDaddyks"       # Mensajes crudos: close/volume por vela 1m
-TOPIC_S5_2 = "imat3a_SOL_BigDaddyks_VWAP"  # Mensajes agregados: vwap y ventana 5m
-GROUP_ID = "imat3a_SOL_BigDaddyks"
+TOPIC_S5_1 = "imat3a_SOL_BigDaddyks"       # Raw messages: close/volume per 1m candle
+TOPIC_S5_2 = "imat3a_SOL_BigDaddyks_VWAP"  # Aggregated messages: VWAP and 5m window
 
-# Creamos el KafkaConsumer (deserializa clave como texto y valor como JSON)
+# KafkaConsumer (key deserialized as text, value as JSON)
 CONSUMER = KafkaConsumer(
     bootstrap_servers=BOOTSTRAP_SERVERS,
     security_protocol="SASL_PLAINTEXT",
@@ -57,38 +49,28 @@ CONSUMER = KafkaConsumer(
 )
 
 # ==========================================
-# FUNCIONES AUXILIARES
+# HELPERS
 # ==========================================
-
-def now_epoch_ms() -> str:
-    """
-    Devuelve el momento actual exacto en milisegundos desde la época Unix (1 enero 1970).
-    Timestream requiere que las marcas de tiempo (timestamps) se envíen en este formato numérico o en segundos.
-    """
-    return str(int(datetime.now(timezone.utc).timestamp() * 1000))
 
 def iso_to_epoch_ms(value: str) -> str:
     """
-    Convierte una fecha en formato texto ISO (ej. "2026-03-25T15:15:00.000Z") 
-    a milisegundos desde la época Unix. Reemplaza la 'Z' por el offset UTC (+00:00) 
-    para que Python pueda parsearlo correctamente.
+    Convert an ISO-8601 string (e.g. "2026-03-25T15:15:00.000Z") to epoch
+    milliseconds. The trailing 'Z' is replaced with '+00:00' so that Python
+    can parse it. Timestream expects the time as a string.
     """
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return str(int(dt.timestamp() * 1000))
 
 
 def kafka_ts_to_epoch_ms(kafka_ts_ms: int) -> str:
-    """
-    Kafka entrega el timestamp del mensaje en milisegundos (epoch). Timestream
-    también lo quiere como texto, así que lo convertimos a str.
-    """
+    """Kafka message timestamps are already epoch milliseconds; Timestream wants a string."""
     return str(int(kafka_ts_ms))
 
 
 def build_quote_record(value: dict, kafka_ts_ms: int) -> dict:
     """
-    Construye el registro para la tabla de cotizaciones (sol_quotes_raw_bigdaddyks).
-    Espera el payload que genera kafka_simple_producer.py:
+    Build the record for the quotes table (sol_quotes_raw_bigdaddyks).
+    Expects the payload produced by kafka_simple_producer.py:
     {
         'symbol': 'SOLUSD',
         '@timestamp': '2026-03-09T11:21:00Z',
@@ -98,7 +80,7 @@ def build_quote_record(value: dict, kafka_ts_ms: int) -> dict:
     """
 
     symbol = value.get("symbol", "UNKNOWN")
-    # Usamos @timestamp si viene en el mensaje; si no, el timestamp de Kafka
+    # Use @timestamp when present; otherwise fall back to the Kafka timestamp
     event_time_ms = iso_to_epoch_ms(value["@timestamp"]) if "@timestamp" in value else kafka_ts_to_epoch_ms(kafka_ts_ms)
 
     return {
@@ -117,8 +99,8 @@ def build_quote_record(value: dict, kafka_ts_ms: int) -> dict:
 
 def build_vwap_record(value: dict, kafka_ts_ms: int) -> dict:
     """
-    Construye el registro para la tabla VWAP (sol_vwap_5m_bigdaddyks).
-    Espera el payload que genera SparkStreamingApp.py:
+    Build the record for the VWAP table (sol_vwap_5m_bigdaddyks).
+    Expects the payload produced by SparkStreamingApp.py:
     {
         'window_start': '2026-03-25T15:10:00Z',
         'window_end':   '2026-03-25T15:15:00Z',
@@ -131,7 +113,7 @@ def build_vwap_record(value: dict, kafka_ts_ms: int) -> dict:
     window_start = value.get("window_start")
     window_end = value.get("window_end")
 
-    # Si no viene la ventana, usamos el timestamp Kafka
+    # If the window is missing, fall back to the Kafka timestamp
     time_ms = iso_to_epoch_ms(window_end) if window_end else kafka_ts_to_epoch_ms(kafka_ts_ms)
 
     return {
@@ -150,26 +132,22 @@ def build_vwap_record(value: dict, kafka_ts_ms: int) -> dict:
     }
 
 # ==========================================
-# FUNCIÓN PRINCIPAL
+# MAIN
 # ==========================================
 
 def main() -> None:
-    # 1. Creamos el cliente de AWS para escribir en Timestream
-    # Boto3 buscará nuestras credenciales de AWS automáticamente
+    # Boto3 resolves AWS credentials automatically (env vars, profile, instance role)
     ts = boto3.client("timestream-write", region_name=REGION)
 
-    # Subscribirse a los topics
     CONSUMER.subscribe([TOPIC_S5_1, TOPIC_S5_2])
 
-    # Bucle principal: leemos y escribimos de forma continua
+    # Main loop: read and write continuously
     while True:
-        # Lee mensajes cada segundo
         records = CONSUMER.poll(timeout_ms=1000)
 
         if not records:
             continue
 
-        # Procesa los mensajes
         for topic_partition, consumer_records in records.items():
             topic_name = topic_partition.topic
 
@@ -179,10 +157,10 @@ def main() -> None:
 
                 try:
                     if topic_name == TOPIC_S5_1:
-                        # Mensaje crudo (close/volume). Se escribe solo en sol_quotes_raw_bigdaddyks
+                        # Raw message (close/volume) -> sol_quotes_raw_bigdaddyks only
                         quote_record = build_quote_record(value, kafka_ts_ms)
 
-                        quote_resp = ts.write_records(
+                        ts.write_records(
                             DatabaseName=DATABASE,
                             TableName=QUOTES_TABLE,
                             Records=[quote_record],
@@ -191,10 +169,10 @@ def main() -> None:
                         print("Write OK -> quotes", json.dumps(quote_record))
 
                     elif topic_name == TOPIC_S5_2:
-                        # Mensaje agregado (VWAP 5m). Se escribe solo en sol_vwap_5m_bigdaddyks
+                        # Aggregated message (5m VWAP) -> sol_vwap_5m_bigdaddyks only
                         vwap_record = build_vwap_record(value, kafka_ts_ms)
 
-                        vwap_resp = ts.write_records(
+                        ts.write_records(
                             DatabaseName=DATABASE,
                             TableName=VWAP_TABLE,
                             Records=[vwap_record],
@@ -203,13 +181,12 @@ def main() -> None:
                         print("Write OK -> vwap", json.dumps(vwap_record))
 
                     else:
-                        # Topic desconocido: lo ignoramos pero avisamos
-                        print(f"Topic no manejado: {topic_name}")
+                        # Unknown topic: ignore it but log a warning
+                        print(f"Unhandled topic: {topic_name}")
 
                 except Exception as exc:
-                    # Captura cualquier error de escritura o parsing para que el bucle siga vivo
-                    print(f"Error procesando topic {topic_name}: {exc}")
+                    # Catch write/parse errors so the loop stays alive
+                    print(f"Error processing topic {topic_name}: {exc}")
 
 if __name__ == "__main__":
     main()
-

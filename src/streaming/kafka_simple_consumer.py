@@ -4,15 +4,11 @@ import json
 from kafka import KafkaConsumer
 from kafka.structs import TopicPartition
 
-# Configuración
-BOOTSTRAP_SERVERS="51.49.235.244:9092"
-USERNAME="kafka_client"
-PASSWORD="88b8a35dca1a04da57dc5f3e"
-TOPIC_S5_1="imat3a_SOL_BigDaddyks"
-TOPIC_S5_2="imat3a_SOL_BigDaddyks_VWAP"
-GROUP_ID="imat3a_SOL_BigDaddyks"
+# Configuration
+from kafka_config import BOOTSTRAP_SERVERS, USERNAME, PASSWORD, GROUP_ID
+from kafka_config import TOPIC_RAW as TOPIC_S5_1, TOPIC_VWAP as TOPIC_S5_2
 
-# Crea el KafkaConsumer
+# Create the KafkaConsumer
 CONSUMER = KafkaConsumer(
     bootstrap_servers=BOOTSTRAP_SERVERS,
     security_protocol="SASL_PLAINTEXT",
@@ -28,16 +24,16 @@ CONSUMER = KafkaConsumer(
 
 def main() -> None:
 
-    # Asigna topic y partición
+    # Subscribe to both topics
     # CONSUMER.assign([TopicPartition(TOPIC_S5, 0)])
     CONSUMER.subscribe([TOPIC_S5_1, TOPIC_S5_2])
 
     while True:
 
-        # Lee los mensajes
+        # Read messages
         records = CONSUMER.poll(timeout_ms=3600.0)
 
-        # Procesa los mensajes
+        # Process messages
         for topic_partition, consumer_records in records.items():
             topic_name = topic_partition.topic
 
@@ -55,13 +51,13 @@ def main() -> None:
                    
                     data = consumer_record.value
                     print("-" * 40)
-                    print(f"Moneda:  {data.get('symbol')}")
-                    print(f"Ventana: {data.get('window_start')} a {data.get('window_end')}")
+                    print(f"Symbol:  {data.get('symbol')}")
+                    print(f"Window:  {data.get('window_start')} to {data.get('window_end')}")
                     print(f"VWAP:    {data.get('vwap')}")
                     print(f"data:    {data}")
                     print("-" * 40)
                     
-    # Cierra el consumidor
+    # Close the consumer
     # CONSUMER.close()
 
 if __name__ == "__main__":

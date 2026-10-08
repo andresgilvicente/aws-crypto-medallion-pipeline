@@ -6,7 +6,7 @@ from kafka_simple_producer import produce
 def handle_kline(msg):
     k = msg['k']
 
-    if k["x"]:  # Solo producimos si ha cerrado la vela (lo indica el booleano de k["x"])
+    if k["x"]:  # Only produce when the candle has closed (k["x"] is True)
         produce(data=k)
 
 
@@ -19,7 +19,7 @@ twm.start_kline_socket(
     callback=handle_kline
 )
 
-input("Pulsa ENTER para salir\n")
+input("Press ENTER to exit\n")
 twm.stop()
 
 

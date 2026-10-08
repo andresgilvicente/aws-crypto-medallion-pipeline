@@ -52,7 +52,7 @@ if time_col:
     if _TIME_COL != time_col:
         df = df.drop(time_col)
 else:
-    raise Exception(f"No se encontró columna temporal en BRONZE. Busca alguna de {time_col_candidates}.")
+    raise Exception(f"No time column found in BRONZE. Looked for any of {time_col_candidates}.")
 
 # Normalize close price column
 close_col_candidates = [_CLOSE_COL, "Close", "close"]
@@ -62,7 +62,7 @@ if close_col:
     if _CLOSE_COL != close_col:
         df = df.drop(close_col)
 else:
-    raise Exception(f"No se encontró columna de cierre en BRONZE. Busca alguna de {close_col_candidates}.")
+    raise Exception(f"No close column found in BRONZE. Looked for any of {close_col_candidates}.")
 
 # Normalize asset (from column or default fallback)
 if _ASSET_COL not in df.columns:

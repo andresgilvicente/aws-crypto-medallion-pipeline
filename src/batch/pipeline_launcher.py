@@ -66,7 +66,7 @@ def start_job_and_wait(job_name: str, args: dict):
         if state in ("SUCCEEDED", "FAILED", "STOPPED", "TIMEOUT"):
             print(f"[END] {job_name} -> {state}")
             if state != "SUCCEEDED":
-                raise RuntimeError(f"Job {job_name} terminó en estado {state}: {jr.get('ErrorMessage')}")
+                raise RuntimeError(f"Job {job_name} finished in state {state}: {jr.get('ErrorMessage')}")
             return
         time.sleep(20)
 
